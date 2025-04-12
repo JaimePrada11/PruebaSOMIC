@@ -2,8 +2,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { connectDB, sequelize } = require('./config/database');
 
-const nitRutas = require('./Rutas/NITRutas');
+const nitRutas = require('./Rutas/NITRutas.js');
 const articuloRutas = require('./Rutas/ArticuloRutas');
+const facturaRutas = require ('./Rutas/FacturaRutas.js');
+const kardexRutas = require ('./Rutas/KardexRutas.js');
 
 const app = express();
 
@@ -11,6 +13,8 @@ app.use(bodyParser.json());
 
 app.use('/api/nit', nitRutas);
 app.use('/api/articulos', articuloRutas);
+app.use('/api/factura', facturaRutas)
+app.use('/kardex', kardexRutas)
 
 
 sequelize.sync({ alter: true }).then(() => {
