@@ -3,12 +3,15 @@ const bodyParser = require('body-parser');
 const { connectDB, sequelize } = require('./config/database');
 
 const nitRutas = require('./Rutas/NITRutas');
+const articuloRutas = require('./Rutas/ArticuloRutas');
 
 const app = express();
 
 app.use(bodyParser.json());
 
 app.use('/api/nit', nitRutas);
+app.use('/api/articulos', articuloRutas);
+
 
 sequelize.sync({ alter: true }).then(() => {
     const port = process.env.PORT || 3000;

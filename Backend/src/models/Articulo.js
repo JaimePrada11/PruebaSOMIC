@@ -1,5 +1,5 @@
 const {DataTypes} = require('sequelize');
-const {sequelize} = require('./sequelize');
+const {sequelize} = require('../config/database');
 
 const Articulo = sequelize.define('Articulo',{
     IDArticulo:{type: DataTypes.INTEGER, primaryKey:true, autoIncrement:true},
@@ -10,7 +10,7 @@ const Articulo = sequelize.define('Articulo',{
     ArticuloPrecioVenta:{type: DataTypes.DECIMAL(10,2), allowNull:false},
 
 },{ 
-    timestamps:true
+    timestamps:false
 
 });
 

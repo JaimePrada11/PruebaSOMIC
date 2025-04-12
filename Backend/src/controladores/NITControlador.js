@@ -48,7 +48,7 @@ const actualizarNIT = async (req, res) => {
         if (!nit) {
             return res.status(404).json({ msg: 'NIT no encontrado' });
         }
-        nit.update(req.body, { where: { id: id } });
+        await nit.update(req.body);
         res.json(nit);
 
     } catch (error) {
