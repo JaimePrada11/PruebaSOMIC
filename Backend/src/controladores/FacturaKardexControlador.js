@@ -1,61 +1,116 @@
 const { FacturaKardex } = require('../models/FacturaKardex');
 const { Articulo } = require('../models/Articulo');
 const { Factura } = require('../models/Factura');
-const { FacturaKardexDTO } = require('../Dto/KardexDto');
+const { NIT } = require('../models/NIT');
+const  FacturaKardexDTO  = require('../Dto/KardexDto');
+const { sequelize } = require('../config/database');
 
-// Crear un movimiento de Kardex
 const crearFacturaKardex = async (req, res) => {
+  const t = await sequelize.transaction();
+  
   try {
     const { IDFactura, IDArticulo, FacturaKardexCantidad, FacturaKardexnaturaleza } = req.body;
+    const cantidad = Number(FacturaKardexCantidad);
 
-    // Verificar si la factura existe
-    const factura = await Factura.findByPk(IDFactura);
-    if (!factura) return res.status(404).json({ message: 'Factura no encontrada' });
-
-    // Verificar si el artículo existe
-    const articulo = await Articulo.findByPk(IDArticulo);
-    if (!articulo) return res.status(404).json({ message: 'Artículo no encontrado' });
-
-    // Verificar la naturaleza del movimiento y actualizar el saldo
-    if (FacturaKardexnaturaleza === '+') {
-      // Si es un movimiento de entrada, aumentamos el saldo
-      articulo.ArticuloSaldo += FacturaKardexCantidad;
-    } else if (FacturaKardexnaturaleza === '-') {
-      // Si es un movimiento de salida, verificamos si hay suficiente saldo
-      if (articulo.ArticuloSaldo < FacturaKardexCantidad) {
-        return res.status(400).json({ message: 'No hay suficiente stock para esta operación' });
-      }
-      articulo.ArticuloSaldo -= FacturaKardexCantidad;
-    } else {
-      return res.status(400).json({ message: 'Naturaleza no válida' });
+    const factura = await Factura.findByPk(IDFactura, { transaction: t });
+    if (!factura) {
+      await t.rollback();
+      return res.status(404).json({ message: 'Factura no encontrada' });
     }
 
-    // Guardar el movimiento en Kardex
+    const articulo = await Articulo.findByPk(IDArticulo, { transaction: t });
+    if (!articulo) {
+      await t.rollback();
+      return res.status(404).json({ message: 'Artículo no encontrado' });
+    }
+
+    const nit = await NIT.findByPk(factura.IDNIT, { transaction: t }); // Obtener NIT asociado a la factura
+    if (!nit) {
+      await t.rollback();
+      return res.status(404).json({ message: 'NIT no encontrado' });
+    }
+
+    // Inicializa totales por si están en null
+    factura.FacturatotalCostos = Number(factura.FacturatotalCostos) || 0;
+    factura.FacturatotalVenta = Number(factura.FacturatotalVenta) || 0;
+
+    let totalCostos = 0;
+    let totalVenta = 0;
+
+    if (FacturaKardexnaturaleza === '+') {
+      // COMPRA
+      articulo.ArticuloSaldo += cantidad;
+      totalCostos = articulo.ArticuloCostos * cantidad;
+      factura.FacturatotalCostos += totalCostos;
+
+    } else if (FacturaKardexnaturaleza === '-') {
+      // VENTA
+      if (articulo.ArticuloSaldo < cantidad) {
+        await t.rollback();
+        return res.status(400).json({ message: 'No hay suficiente stock para esta operación' });
+      }
+
+      // Verificar si hay suficiente cupo en el NIT para esta venta
+      const totalVentaAfectado = articulo.ArticuloPrecioVenta * cantidad;
+      if (nit.NITCupo < totalVentaAfectado) {
+        await t.rollback();
+        return res.status(400).json({ message: 'No hay suficiente cupo disponible para esta venta' });
+      }
+
+      nit.NITCupo -= totalVentaAfectado; // Descontar el monto del cupo disponible
+      articulo.ArticuloSaldo -= cantidad;
+      totalVenta = totalVentaAfectado;
+      factura.FacturatotalVenta += totalVenta;
+    } else {
+      await t.rollback();
+      return res.status(400).json({ message: 'Naturaleza no válida (usa "+" o "-")' });
+    }
+
+    // Guardar movimiento en el Kardex
     const kardex = await FacturaKardex.create({
       IDFactura,
       IDArticulo,
-      FacturaKardexCantidad,
+      FacturaKardexCantidad: cantidad,
       FacturaKardexnaturaleza
+    }, { transaction: t });
+
+    await articulo.save({ transaction: t });
+    await nit.save({ transaction: t }); // Guardar cambios en el NIT
+
+    // Preparar respuesta DTO
+    const result = new FacturaKardexDTO({
+      ...kardex.dataValues,
+      FacturaKardexnaturaleza,
+      ArticuloNombre: articulo.ArticuloNombre,
+      ArticuloPrecioVenta: articulo.ArticuloPrecioVenta,
+      ArticuloCostos: articulo.ArticuloCostos,
+      totalCostos,
+      totalVenta
     });
 
-    // Actualizar el saldo del artículo
-    await articulo.save();
+    // Redondear antes de guardar
+    factura.FacturatotalCostos = Number(factura.FacturatotalCostos.toFixed(2));
+    factura.FacturatotalVenta = Number(factura.FacturatotalVenta.toFixed(2));
 
-    // Retornar la respuesta con los datos del Kardex
-    const result = new FacturaKardexDTO(kardex);
+    await factura.save({ transaction: t });
+
+    await t.commit();
     res.status(201).json(result);
+
   } catch (error) {
     console.error(error);
+    await t.rollback();
     res.status(500).json({ message: 'Error al crear el movimiento de Kardex' });
   }
 };
 
-// Obtener todos los movimientos de Kardex de una factura
+
+
+
 const obtenerKardexDeFactura = async (req, res) => {
   try {
     const { IDFactura } = req.params;
 
-    // Obtener todos los movimientos de Kardex de la factura
     const kardex = await FacturaKardex.findAll({
       where: { IDFactura },
       include: [{
@@ -65,7 +120,6 @@ const obtenerKardexDeFactura = async (req, res) => {
       }]
     });
 
-    // Si no hay movimientos de Kardex, se devuelve un error
     if (!kardex || kardex.length === 0) {
       return res.status(404).json({ message: 'No se encontraron movimientos de Kardex para esta factura' });
     }
@@ -79,36 +133,104 @@ const obtenerKardexDeFactura = async (req, res) => {
   }
 };
 
-// Eliminar un movimiento de Kardex
 const eliminarKardex = async (req, res) => {
+  const t = await sequelize.transaction();
   try {
     const { id } = req.params;
 
-    // Buscar el movimiento de Kardex por ID
-    const kardex = await FacturaKardex.findByPk(id);
+    const kardex = await FacturaKardex.findByPk(id, { transaction: t });
     if (!kardex) return res.status(404).json({ message: 'Movimiento de Kardex no encontrado' });
 
-    // Verificar si la naturaleza es de tipo '-' (salida)
+    const articulo = await Articulo.findByPk(kardex.IDArticulo, { transaction: t });
+    if (!articulo) return res.status(404).json({ message: 'Artículo no encontrado' });
+
+    const factura = await Factura.findByPk(kardex.IDFactura, { transaction: t });
+    if (!factura) return res.status(404).json({ message: 'Factura no encontrada' });
+
     if (kardex.FacturaKardexnaturaleza === '-') {
-      // Si es una salida, revertir el saldo del artículo
-      const articulo = await Articulo.findByPk(kardex.IDArticulo);
       articulo.ArticuloSaldo += kardex.FacturaKardexCantidad;
-      await articulo.save();
+
+      const restaVenta = articulo.ArticuloPrecioVenta * kardex.FacturaKardexCantidad;
+      factura.FacturatotalVenta -= restaVenta;
+      if (factura.FacturatotalVenta < 0) factura.FacturatotalVenta = 0;
+
     } else if (kardex.FacturaKardexnaturaleza === '+') {
-      // Si es una entrada, reducir el saldo del artículo
-      const articulo = await Articulo.findByPk(kardex.IDArticulo);
       articulo.ArticuloSaldo -= kardex.FacturaKardexCantidad;
-      await articulo.save();
+
+      const restaCosto = articulo.ArticuloCostos * kardex.FacturaKardexCantidad;
+      factura.FacturatotalCostos -= restaCosto;
+      if (factura.FacturatotalCostos < 0) factura.FacturatotalCostos = 0;
     }
 
-    // Eliminar el movimiento de Kardex
-    await kardex.destroy();
+    // Guardar cambios
+    await articulo.save({ transaction: t });
+    await factura.save({ transaction: t });
+
+    // Eliminar el movimiento
+    await kardex.destroy({ transaction: t });
+
+    await t.commit();
 
     res.json({ message: 'Movimiento de Kardex eliminado correctamente' });
   } catch (error) {
+    await t.rollback();
     console.error(error);
     res.status(500).json({ message: 'Error al eliminar el movimiento de Kardex' });
   }
 };
 
-module.exports = { crearFacturaKardex, obtenerKardexDeFactura, eliminarKardex };
+
+const actualizarKardex = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const { FacturaKardexCantidad, FacturaKardexnaturaleza } = req.body;
+
+    const kardex = await FacturaKardex.findByPk(id, { transaction: t });
+    if (!kardex) return res.status(404).json({ message: 'Movimiento de Kardex no encontrado' });
+
+    const articulo = await Articulo.findByPk(kardex.IDArticulo, { transaction: t });
+    if (!articulo) return res.status(404).json({ message: 'Artículo no encontrado' });
+
+    if (kardex.FacturaKardexnaturaleza === '-') {
+      articulo.ArticuloSaldo += kardex.FacturaKardexCantidad;
+    } else if (kardex.FacturaKardexnaturaleza === '+') {
+      articulo.ArticuloSaldo -= kardex.FacturaKardexCantidad;
+    }
+
+    kardex.FacturaKardexCantidad = FacturaKardexCantidad;
+    kardex.FacturaKardexnaturaleza = FacturaKardexnaturaleza;
+
+    if (FacturaKardexnaturaleza === '+') {
+      articulo.ArticuloSaldo += FacturaKardexCantidad;
+    } else if (FacturaKardexnaturaleza === '-') {
+      if (articulo.ArticuloSaldo < FacturaKardexCantidad) {
+        return res.status(400).json({ message: 'No hay suficiente stock para esta operación' });
+      }
+      articulo.ArticuloSaldo -= FacturaKardexCantidad;
+    } else {
+      return res.status(400).json({ message: 'Naturaleza no válida' });
+    }
+
+    await articulo.save({ transaction: t });
+    await kardex.save({ transaction: t });
+
+    await t.commit();
+
+    const result = new FacturaKardexDTO({
+      ...kardex.dataValues,
+      ArticuloNombre: articulo.ArticuloNombre,
+      ArticuloPrecioVenta: articulo.ArticuloPrecioVenta,
+      ArticuloCostos: articulo.ArticuloCostos
+    });
+
+    res.json(result);
+  } catch (error) {
+    await t.rollback();
+    console.error(error);
+    res.status(500).json({ message: 'Error al actualizar el movimiento de Kardex' });
+  }
+};
+
+
+module.exports = { crearFacturaKardex, actualizarKardex, obtenerKardexDeFactura, eliminarKardex };

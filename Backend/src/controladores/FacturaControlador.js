@@ -2,6 +2,7 @@ const { Factura } = require('../models/Factura');
 const { NIT } = require('../models/NIT');
 const FacturaDTO = require('../Dto/FacturaDto');
 const { sequelize } = require('../config/database');
+const { FacturaKardex } = require('../models/FacturaKardex');
 
 const crearFactura = async (req, res) => {
   const t = await sequelize.transaction()
@@ -51,14 +52,14 @@ const obtenerTodasFacturas = async (req, res) => {
       }]
     });
 
-    const result = facturas.map(factura => new FacturaDTO(factura));
-
+    const result = facturas.map(factura => new FacturaDTO(factura.toJSON()));
     res.json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error al obtener las facturas' });
   }
 };
+
 
 const obtenerFactura = async (req, res) => {
   try {
@@ -85,6 +86,11 @@ const eliminarFactura = async (req, res) => {
   const t = await sequelize.transaction();
   try {
     const { id } = req.params;
+    await FacturaKardex.destroy({
+      where: { IDFactura: id },
+      transaction: t
+    });
+
     const deleted = await Factura.destroy({ where: { IDFactura: id }, transaction: t });
 
     if (!deleted) return res.status(404).json({ message: 'Factura no encontrada' });
