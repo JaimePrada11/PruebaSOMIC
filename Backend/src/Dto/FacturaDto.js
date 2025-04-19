@@ -12,5 +12,5 @@ class FacturaDTO {
   }
 }
 
-module.exports = { FacturaDTO };
+module.exports =  FacturaDTO ;
 

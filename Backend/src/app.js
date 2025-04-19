@@ -14,7 +14,7 @@ app.use(bodyParser.json());
 app.use('/api/nit', nitRutas);
 app.use('/api/articulos', articuloRutas);
 app.use('/api/factura', facturaRutas)
-app.use('/kardex', kardexRutas)
+app.use('/api/kardex', kardexRutas)
 
 
 sequelize.sync({ alter: true }).then(() => {
