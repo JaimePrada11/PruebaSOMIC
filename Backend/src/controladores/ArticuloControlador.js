@@ -1,22 +1,19 @@
-const Articulo = require('../models/Articulo');
-const { validationResult } = require('express-validator');
+const {Articulo} = require('../models/Articulo');
+const { sequelize } = require('../config/database');
 
-// Crear un Articulo
 const crearArticulo = async (req, res) => {
-    const errores = validationResult(req);
-    if (!errores.isEmpty()) {
-        return res.status(400).json({ msg: errores.array() });
-    }
+    const t = await sequelize.transaction(); 
     try {
-        const articulo = await Articulo.create(req.body);
+        const articulo = await Articulo.create(req.body, { transaction: t });
+        await t.commit(); 
         res.status(201).json({ msg: 'Articulo creado correctamente', articulo });
     } catch (error) {
+        await t.rollback();
         console.error(error);
         res.status(500).json({ msg: 'Error al crear el articulo' });
     }
 };
 
-// Obtener todos los Artículos
 const obtenerArticulos = async (req, res) => {
     try {
         const articulos = await Articulo.findAll();
@@ -27,7 +24,6 @@ const obtenerArticulos = async (req, res) => {
     }
 };
 
-// Obtener un Articulo por ID
 const obtenerArticulo = async (req, res) => {
     const { id } = req.params;
     try {
@@ -42,37 +38,37 @@ const obtenerArticulo = async (req, res) => {
     }
 };
 
-// Actualizar un Articulo
 const actualizarArticulo = async (req, res) => {
     const { id } = req.params;
-    const errores = validationResult(req);
-    if (!errores.isEmpty()) {
-        return res.status(400).json({ msg: errores.array() });
-    }
+    const t = await sequelize.transaction(); 
     try {
         const articulo = await Articulo.findByPk(id);
         if (!articulo) {
             return res.status(404).json({ msg: 'Articulo no encontrado' });
         }
-        await articulo.update(req.body);
+        await articulo.update(req.body, { transaction: t });
+        await t.commit();
         res.json({ msg: 'Articulo actualizado correctamente', articulo });
     } catch (error) {
+        await t.rollback(); 
         console.error(error);
         res.status(500).json({ msg: 'Error al actualizar el articulo' });
     }
 };
 
-// Eliminar un Articulo
 const eliminarArticulo = async (req, res) => {
     const { id } = req.params;
+    const t = await sequelize.transaction(); 
     try {
         const articulo = await Articulo.findByPk(id);
         if (!articulo) {
             return res.status(404).json({ msg: 'Articulo no encontrado' });
         }
-        await articulo.destroy(); // Asegúrate de esperar a que se complete la eliminación
+        await articulo.destroy({ transaction: t });
+        await t.commit();
         res.json({ msg: `Articulo con ID ${id} eliminado correctamente` });
     } catch (error) {
+        await t.rollback();
         console.error(error);
         res.status(500).json({ msg: 'Error al eliminar el articulo' });
     }
