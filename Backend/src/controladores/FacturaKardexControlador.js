@@ -24,13 +24,12 @@ const crearFacturaKardex = async (req, res) => {
       return res.status(404).json({ message: 'Artículo no encontrado' });
     }
 
-    const nit = await NIT.findByPk(factura.IDNIT, { transaction: t }); // Obtener NIT asociado a la factura
+    const nit = await NIT.findByPk(factura.IDNIT, { transaction: t }); 
     if (!nit) {
       await t.rollback();
       return res.status(404).json({ message: 'NIT no encontrado' });
     }
 
-    // Inicializa totales por si están en null
     factura.FacturatotalCostos = Number(factura.FacturatotalCostos) || 0;
     factura.FacturatotalVenta = Number(factura.FacturatotalVenta) || 0;
 
@@ -38,26 +37,23 @@ const crearFacturaKardex = async (req, res) => {
     let totalVenta = 0;
 
     if (FacturaKardexnaturaleza === '+') {
-      // COMPRA
       articulo.ArticuloSaldo += cantidad;
       totalCostos = articulo.ArticuloCostos * cantidad;
       factura.FacturatotalCostos += totalCostos;
 
     } else if (FacturaKardexnaturaleza === '-') {
-      // VENTA
       if (articulo.ArticuloSaldo < cantidad) {
         await t.rollback();
         return res.status(400).json({ message: 'No hay suficiente stock para esta operación' });
       }
 
-      // Verificar si hay suficiente cupo en el NIT para esta venta
       const totalVentaAfectado = articulo.ArticuloPrecioVenta * cantidad;
       if (nit.NITCupo < totalVentaAfectado) {
         await t.rollback();
         return res.status(400).json({ message: 'No hay suficiente cupo disponible para esta venta' });
       }
 
-      nit.NITCupo -= totalVentaAfectado; // Descontar el monto del cupo disponible
+      nit.NITCupo -= totalVentaAfectado; 
       articulo.ArticuloSaldo -= cantidad;
       totalVenta = totalVentaAfectado;
       factura.FacturatotalVenta += totalVenta;
@@ -66,7 +62,6 @@ const crearFacturaKardex = async (req, res) => {
       return res.status(400).json({ message: 'Naturaleza no válida (usa "+" o "-")' });
     }
 
-    // Guardar movimiento en el Kardex
     const kardex = await FacturaKardex.create({
       IDFactura,
       IDArticulo,
@@ -75,9 +70,8 @@ const crearFacturaKardex = async (req, res) => {
     }, { transaction: t });
 
     await articulo.save({ transaction: t });
-    await nit.save({ transaction: t }); // Guardar cambios en el NIT
+    await nit.save({ transaction: t }); 
 
-    // Preparar respuesta DTO
     const result = new FacturaKardexDTO({
       ...kardex.dataValues,
       FacturaKardexnaturaleza,
@@ -88,7 +82,6 @@ const crearFacturaKardex = async (req, res) => {
       totalVenta
     });
 
-    // Redondear antes de guardar
     factura.FacturatotalCostos = Number(factura.FacturatotalCostos.toFixed(2));
     factura.FacturatotalVenta = Number(factura.FacturatotalVenta.toFixed(2));
 
@@ -162,11 +155,9 @@ const eliminarKardex = async (req, res) => {
       if (factura.FacturatotalCostos < 0) factura.FacturatotalCostos = 0;
     }
 
-    // Guardar cambios
     await articulo.save({ transaction: t });
     await factura.save({ transaction: t });
 
-    // Eliminar el movimiento
     await kardex.destroy({ transaction: t });
 
     await t.commit();
